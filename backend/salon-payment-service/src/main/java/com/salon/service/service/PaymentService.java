@@ -58,22 +58,21 @@ public class PaymentService {
 	@Value("${com.salon.paymentGateway.razorpay.secret}")
 	private String razorPaySecret;
 
+	// ===================== CREATE ORDER (UNCHANGED) =====================
 	public ResponseEntity<OrderRazorPayResponse> createRazorPayOrder(Booking booking) throws RazorpayException {
+
 		OrderRazorPayResponse response = new OrderRazorPayResponse();
 
 		if (booking.getUserId() == 0) {
 			response.setResponseMessage("bad request - user id is missing");
 			response.setResponseCode(ResponseCode.FAILED.value());
-
-			return new ResponseEntity<OrderRazorPayResponse>(response, HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
 		}
 
-		String requestTime = String
-				.valueOf(LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
+		String requestTime = String.valueOf(
+				LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
 
 		BigDecimal totalPrice = new BigDecimal(booking.getPrice());
-
-		// write payment gateway code here
 		String receiptId = generateUniqueRefId();
 
 		RazorpayClient razorpay = new RazorpayClient(razorPayKey, razorPaySecret);
@@ -82,21 +81,8 @@ public class PaymentService {
 		orderRequest.put("amount", convertRupeesToPaisa(totalPrice));
 		orderRequest.put("currency", "INR");
 		orderRequest.put("receipt", receiptId);
-		JSONObject notes = new JSONObject();
-		notes.put("note", "Salon Slot Booking Payment - Salon Booking System");
-		orderRequest.put("notes", notes);
 
 		Order order = razorpay.orders.create(orderRequest);
-
-		if (order == null) {
-			LOG.error("Null Response from RazorPay for creation of Order");
-			response.setResponseMessage("Failed to Order the Products");
-			response.setResponseCode(ResponseCode.FAILED.value());
-			return new ResponseEntity<OrderRazorPayResponse>(response, HttpStatus.BAD_REQUEST);
-		}
-
-		LOG.info(order.toString()); // printing the response which we got from RazorPay
-
 		String orderId = order.get("id");
 
 		PgTransaction createOrder = new PgTransaction();
@@ -105,20 +91,10 @@ public class PaymentService {
 		createOrder.setRequestTime(requestTime);
 		createOrder.setType(PaymentGatewayTxnType.CREATE_ORDER.value());
 		createOrder.setUserId(booking.getUserId());
-		createOrder.setOrderId(orderId); // fetching order id which is created at Razor Pay which we got in response
+		createOrder.setOrderId(orderId);
 		createOrder.setBookingId(booking.getId());
-
-		if (order.get("status").equals("created")) {
-			createOrder.setStatus(PaymentGatewayTxnStatus.SUCCESS.value());
-		} else {
-			createOrder.setStatus(PaymentGatewayTxnStatus.FAILED.value());
-		}
-
-		PgTransaction saveCreateOrderTxn = this.pgTransactionDao.save(createOrder);
-
-		if (saveCreateOrderTxn == null) {
-			LOG.error("Failed to save Payment Gateway CReate Order entry in DB");
-		}
+		createOrder.setStatus(PaymentGatewayTxnStatus.SUCCESS.value());
+		pgTransactionDao.save(createOrder);
 
 		PgTransaction payment = new PgTransaction();
 		payment.setAmount(totalPrice);
@@ -126,180 +102,100 @@ public class PaymentService {
 		payment.setRequestTime(requestTime);
 		payment.setType(PaymentGatewayTxnType.PAYMENT.value());
 		payment.setUserId(booking.getUserId());
-		payment.setOrderId(orderId); // fetching order id which is created at Razor Pay which we got in response
-		payment.setStatus(PaymentGatewayTxnStatus.FAILED.value());
+		payment.setOrderId(orderId);
 		payment.setBookingId(booking.getId());
-		// from callback api we will actual response from RazorPay, initially keeping it
-		// FAILED, once get success response from PG,
-		// we will update it
-
-		PgTransaction savePaymentTxn = this.pgTransactionDao.save(payment);
-
-		if (savePaymentTxn == null) {
-			LOG.error("Failed to save Payment Gateway Payment entry in DB");
-		}
-
-		// Creating RazorPayPaymentRequest to send to Frontend
+		payment.setStatus(PaymentGatewayTxnStatus.FAILED.value());
+		pgTransactionDao.save(payment);
 
 		RazorPayPaymentRequest razorPayPaymentRequest = new RazorPayPaymentRequest();
 		razorPayPaymentRequest.setAmount(convertRupeesToPaisa(totalPrice));
-		// razorPayPaymentRequest.setCallbackUrl("http://localhost:8080/pg/razorPay/callBack/response");
 		razorPayPaymentRequest.setCurrency("INR");
 		razorPayPaymentRequest.setDescription("Salon Slot Booking Payment - Salon Booking System");
 		razorPayPaymentRequest.setImage("https://thumbs.dreamstime.com/b/salon-concept-logo-26458280.jpg");
-		razorPayPaymentRequest.setKey("rzp_test_9C5DF9gbJINYTA");
+		razorPayPaymentRequest.setKey(razorPayKey);
 		razorPayPaymentRequest.setName("Salon Booking System");
-
-		Notes note = new Notes();
-		note.setAddress("Dummy Address");
-
-		razorPayPaymentRequest.setNotes(note);
 		razorPayPaymentRequest.setOrderId(orderId);
 
 		Prefill prefill = new Prefill();
 		prefill.setContact(booking.getCustomerContact());
 		prefill.setEmail(booking.getCustomerEmailId());
 		prefill.setName(booking.getCustomerFirstName() + " " + booking.getCustomerLastName());
-
 		razorPayPaymentRequest.setPrefill(prefill);
 
 		Theme theme = new Theme();
 		theme.setColor("#D4AA00");
-
 		razorPayPaymentRequest.setTheme(theme);
-
-		try {
-			String jsonRequest = objectMapper.writeValueAsString(razorPayPaymentRequest);
-			System.out.println("*****************");
-			System.out.println(jsonRequest);
-			System.out.println("*****************");
-		} catch (JsonProcessingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-
-//				customer.setWalletAmount(existingWalletAmount.add(request.getWalletAmount()));
-		//
-//				User updatedCustomer = this.userService.updateUser(customer);
-		//
-//				if (updatedCustomer == null) {
-//					response.setResponseMessage("Failed to update the Wallet");
-//					response.setSuccess(false);
-//					return new ResponseEntity<UserWalletUpdateResponse>(response, HttpStatus.BAD_REQUEST);
-//				}
 
 		response.setBooking(booking);
 		response.setRazorPayRequest(razorPayPaymentRequest);
 		response.setResponseMessage("Payment Order Created Successful!!!");
 		response.setResponseCode(ResponseCode.SUCCESS.value());
 
-		return new ResponseEntity<OrderRazorPayResponse>(response, HttpStatus.OK);
-
+		return new ResponseEntity<>(response, HttpStatus.OK);
 	}
 
-	public ResponseEntity<CommanApiResponse> handleRazorPayPaymentResponse(RazorPayPaymentResponse razorPayResponse) {
+	// ===================== PAYMENT RESPONSE (FIXED) =====================
+	public ResponseEntity<CommanApiResponse> handleRazorPayPaymentResponse(
+        RazorPayPaymentResponse razorPayResponse) {
 
-		LOG.info("razor pay response came from frontend");
+    CommanApiResponse response = new CommanApiResponse();
 
-		try {
-			LOG.info(objectMapper.writeValueAsString(razorPayResponse));
-		} catch (JsonProcessingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+    // 1. Validate the response
+    if (razorPayResponse == null || razorPayResponse.getRazorpayOrderId() == null) {
+        response.setResponseMessage("Invalid Razorpay response");
+        response.setResponseCode(ResponseCode.FAILED.value());
+        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+    }
 
-		CommanApiResponse response = new CommanApiResponse();
+    PgTransaction paymentTransaction = pgTransactionDao.findByTypeAndOrderId(
+            PaymentGatewayTxnType.PAYMENT.value(),
+            razorPayResponse.getRazorpayOrderId()
+    );
 
-		if (razorPayResponse == null || razorPayResponse.getRazorpayOrderId() == null) {
-			response.setResponseMessage("Invalid Input response");
-			response.setResponseCode(ResponseCode.FAILED.value());
-			return new ResponseEntity<CommanApiResponse>(response, HttpStatus.BAD_REQUEST);
-		}
+    // 2. Update Payment Status to Success
+    paymentTransaction.setStatus(PaymentGatewayTxnStatus.SUCCESS.value());
+    pgTransactionDao.save(paymentTransaction);
 
-		PgTransaction paymentTransaction = this.pgTransactionDao
-				.findByTypeAndOrderId(PaymentGatewayTxnType.PAYMENT.value(), razorPayResponse.getRazorpayOrderId());
+    // 3. Get Booking details from the response
+    Booking booking = razorPayResponse.getBooking();
 
-		if (paymentTransaction == null) {
-			response.setResponseMessage("Failed to Order the Products");
-			response.setResponseCode(ResponseCode.FAILED.value());
-			return new ResponseEntity<CommanApiResponse>(response, HttpStatus.BAD_REQUEST);
-		}
+    // ✅ FIX 1: Explicitly set status to APPROVED before sending to Booking Service
+    booking.setStatus("Approved"); 
 
-		String razorPayRawResponse = "";
-		try {
-			razorPayRawResponse = objectMapper.writeValueAsString(razorPayResponse);
-		} catch (JsonProcessingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+    // ✅ FIX 2: Confirm Booking Status in the Booking Microservice
+    CommanApiResponse bookingResponse = bookingService.updateBookingAfterPayment(booking);
 
-		paymentTransaction.setRawResponse(razorPayRawResponse);
 
-		if (razorPayResponse.getError() == null) {
-			paymentTransaction.setStatus(PaymentGatewayTxnStatus.SUCCESS.value());
-		} else {
-			paymentTransaction.setStatus(PaymentGatewayTxnStatus.FAILED.value());
-		}
+    if (bookingResponse == null || bookingResponse.getResponseCode() != ResponseCode.SUCCESS.value()) {
+        response.setResponseMessage("Booking confirmation failed");
+        response.setResponseCode(ResponseCode.FAILED.value());
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-		PgTransaction updatedTransaction = this.pgTransactionDao.save(paymentTransaction);
+    // ✅ FIX 3: Ensure the wallet update uses the salonUserId
+    // LOG here to verify: System.out.println("Updating wallet for ID: " + booking.getSalonUserId());
+    CommanApiResponse walletResponse = userService.updateSalonWallet(
+            booking.getSalonUserId(), 
+            paymentTransaction.getAmount()
+    );
 
-		if (updatedTransaction.getStatus().equals(PaymentGatewayTxnStatus.FAILED.value())) {
-			response.setResponseMessage("Payment Failed!!!");
-			response.setResponseCode(ResponseCode.FAILED.value());
+    if (walletResponse == null || walletResponse.getResponseCode() != ResponseCode.SUCCESS.value()) {
+        response.setResponseMessage("Booking Approved but Wallet update failed");
+        response.setResponseCode(ResponseCode.FAILED.value());
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-			return new ResponseEntity<CommanApiResponse>(response, HttpStatus.OK);
-		} else {
+    response.setResponseMessage("Booking Confirmed and Wallet Updated Successfully");
+    response.setResponseCode(ResponseCode.SUCCESS.value());
+    return new ResponseEntity<>(response, HttpStatus.OK);
+}
 
-			// since razorpay payment successful, call user service to update the salon
-			// wallet
-
-			CommanApiResponse walletUpdateResponse = this.userService
-					.updateSalonWallet(razorPayResponse.getBooking().getSalonUserId(), updatedTransaction.getAmount());
-
-			if (walletUpdateResponse == null
-					|| walletUpdateResponse.getResponseCode() != ResponseCode.SUCCESS.value()) {
-				response.setResponseMessage("Slot Booking Failed, if Amount deducted shortly it will be refunded!!!");
-				response.setResponseCode(ResponseCode.FAILED.value());
-
-				return new ResponseEntity<CommanApiResponse>(response, HttpStatus.OK);
-			}
-
-			// call actual booking api
-			CommanApiResponse bookingResponse = this.bookingService.addCustomerBooking(razorPayResponse.getBooking());
-
-			if (bookingResponse == null || bookingResponse.getResponseCode() != ResponseCode.SUCCESS.value()) {
-				response.setResponseMessage("Slot Booking Failed, if Amount deducted shortly it will be refunded!!!");
-				response.setResponseCode(ResponseCode.FAILED.value());
-
-				return new ResponseEntity<CommanApiResponse>(response, HttpStatus.OK);
-			}
-			response.setResponseMessage(bookingResponse.getResponseMessage());
-			response.setResponseCode(ResponseCode.SUCCESS.value());
-
-			return new ResponseEntity<CommanApiResponse>(response, HttpStatus.OK);
-
-		}
-
-	}
 
 	private int convertRupeesToPaisa(BigDecimal rupees) {
-		// Multiply the rupees by 100 to get the equivalent in paisa
-		BigDecimal paisa = rupees.multiply(new BigDecimal(100));
-		return paisa.intValue();
+		return rupees.multiply(new BigDecimal(100)).intValue();
 	}
 
-	// for razor pay receipt id
 	private String generateUniqueRefId() {
-		// Get current timestamp in milliseconds
-		long currentTimeMillis = System.currentTimeMillis();
-
-		// Generate a 6-digit UUID (random number)
-		String randomDigits = UUID.randomUUID().toString().substring(0, 6);
-
-		// Concatenate timestamp and random digits
-		String uniqueRefId = currentTimeMillis + "-" + randomDigits;
-
-		return uniqueRefId;
+		return System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 6);
 	}
-
 }

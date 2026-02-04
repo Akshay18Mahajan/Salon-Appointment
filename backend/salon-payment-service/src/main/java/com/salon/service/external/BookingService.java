@@ -9,10 +9,17 @@ import com.salon.service.dto.Booking;
 import com.salon.service.dto.CommanApiResponse;
 
 @Component
-@FeignClient(name = "salon-booking-service", url = "http://localhost:8080/api/book/salon")
+@FeignClient(
+    name = "salon-booking-service",
+    url = "http://localhost:8080/api/book/salon"
+)
 public interface BookingService {
 
-	@PostMapping("/")
-	public CommanApiResponse addCustomerBooking(@RequestBody Booking booking);
+    // ❌ OLD – booking create (before payment)
+    @PostMapping("/")
+    CommanApiResponse addCustomerBooking(@RequestBody Booking booking);
 
+    // ✅ NEW – booking update AFTER payment success
+    @PostMapping("/update-after-payment")
+    CommanApiResponse updateBookingAfterPayment(@RequestBody Booking booking);
 }

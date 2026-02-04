@@ -16,22 +16,27 @@ import com.salon.service.pg.RazorPayPaymentResponse;
 import com.salon.service.service.PaymentService;
 
 @RestController
-@RequestMapping("api/payment/")
-@CrossOrigin(origins = "*", allowedHeaders = "*")
+@RequestMapping("/api/payment")
+@CrossOrigin(origins = "*")
 public class PaymentController {
 
-	@Autowired
-	private PaymentService paymentService;
+    @Autowired
+    private PaymentService paymentService;
 
-	@PutMapping("order/create")
-	public ResponseEntity<OrderRazorPayResponse> createRazorPayOrder(@RequestBody Booking booking) throws RazorpayException {
-		return this.paymentService.createRazorPayOrder(booking);
-	}
+    // STEP 1: Create Razorpay Order
+    @PutMapping("/order/create")
+    public ResponseEntity<OrderRazorPayResponse> createRazorPayOrder(
+            @RequestBody Booking booking) throws RazorpayException {
 
-	@PutMapping("razorpPay/response")
-	public ResponseEntity<CommanApiResponse> updateUserWallet(@RequestBody RazorPayPaymentResponse razorPayResponse)
-			throws RazorpayException {
-		return this.paymentService.handleRazorPayPaymentResponse(razorPayResponse);
-	}
+        return paymentService.createRazorPayOrder(booking);
+    }
 
+    // STEP 2: Handle Razorpay success response
+    @PutMapping("/razorpay/response")
+    public ResponseEntity<CommanApiResponse> updateUserWallet(
+            @RequestBody RazorPayPaymentResponse razorPayResponse)
+            throws RazorpayException {
+
+        return paymentService.handleRazorPayPaymentResponse(razorPayResponse);
+    }
 }

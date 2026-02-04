@@ -2,134 +2,67 @@ package com.salon.service.dto;
 
 public class Booking {
 
-	private int id;
+    private int id;
+    private String bookingId;
+    private int userId;
+    private String date;
+    private String timeSlot;
 
-	private String bookingId;
+    // 🔥 IMPORTANT
+    private String status;          // PENDING / CONFIRMED
+    private String paymentStatus;   // PENDING / PAID
 
-	private int userId;
+    private int salonId;
+    private double price;
 
-	private String date;
+    private String customerFirstName;
+    private String customerLastName;
+    private String customerContact;
+    private String customerEmailId;
 
-	private String timeSlot;
+    private int salonUserId;
 
-	private String status;
+    // ===== GETTERS & SETTERS =====
 
-	private int salonId;
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
 
-	private double price;
+    public String getBookingId() { return bookingId; }
+    public void setBookingId(String bookingId) { this.bookingId = bookingId; }
 
-	private String customerFirstName;
+    public int getUserId() { return userId; }
+    public void setUserId(int userId) { this.userId = userId; }
 
-	private String customerLastName;
+    public String getDate() { return date; }
+    public void setDate(String date) { this.date = date; }
 
-	private String customerContact;
+    public String getTimeSlot() { return timeSlot; }
+    public void setTimeSlot(String timeSlot) { this.timeSlot = timeSlot; }
 
-	private String customerEmailId;
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
 
-	private int salonUserId;
+    public String getPaymentStatus() { return paymentStatus; }
+    public void setPaymentStatus(String paymentStatus) { this.paymentStatus = paymentStatus; }
 
-	public int getId() {
-		return id;
-	}
+    public int getSalonId() { return salonId; }
+    public void setSalonId(int salonId) { this.salonId = salonId; }
 
-	public void setId(int id) {
-		this.id = id;
-	}
+    public double getPrice() { return price; }
+    public void setPrice(double price) { this.price = price; }
 
-	public String getBookingId() {
-		return bookingId;
-	}
+    public String getCustomerFirstName() { return customerFirstName; }
+    public void setCustomerFirstName(String customerFirstName) { this.customerFirstName = customerFirstName; }
 
-	public void setBookingId(String bookingId) {
-		this.bookingId = bookingId;
-	}
+    public String getCustomerLastName() { return customerLastName; }
+    public void setCustomerLastName(String customerLastName) { this.customerLastName = customerLastName; }
 
-	public int getUserId() {
-		return userId;
-	}
+    public String getCustomerContact() { return customerContact; }
+    public void setCustomerContact(String customerContact) { this.customerContact = customerContact; }
 
-	public void setUserId(int userId) {
-		this.userId = userId;
-	}
+    public String getCustomerEmailId() { return customerEmailId; }
+    public void setCustomerEmailId(String customerEmailId) { this.customerEmailId = customerEmailId; }
 
-	public String getStatus() {
-		return status;
-	}
-
-	public void setStatus(String status) {
-		this.status = status;
-	}
-
-	public int getSalonId() {
-		return salonId;
-	}
-
-	public void setSalonId(int salonId) {
-		this.salonId = salonId;
-	}
-
-	public String getDate() {
-		return date;
-	}
-
-	public void setDate(String date) {
-		this.date = date;
-	}
-
-	public String getTimeSlot() {
-		return timeSlot;
-	}
-
-	public void setTimeSlot(String timeSloe) {
-		this.timeSlot = timeSloe;
-	}
-
-	public double getPrice() {
-		return price;
-	}
-
-	public void setPrice(double price) {
-		this.price = price;
-	}
-
-	public String getCustomerFirstName() {
-		return customerFirstName;
-	}
-
-	public void setCustomerFirstName(String customerFirstName) {
-		this.customerFirstName = customerFirstName;
-	}
-
-	public String getCustomerLastName() {
-		return customerLastName;
-	}
-
-	public void setCustomerLastName(String customerLastName) {
-		this.customerLastName = customerLastName;
-	}
-
-	public String getCustomerContact() {
-		return customerContact;
-	}
-
-	public void setCustomerContact(String customerContact) {
-		this.customerContact = customerContact;
-	}
-
-	public String getCustomerEmailId() {
-		return customerEmailId;
-	}
-
-	public void setCustomerEmailId(String customerEmailId) {
-		this.customerEmailId = customerEmailId;
-	}
-
-	public int getSalonUserId() {
-		return salonUserId;
-	}
-
-	public void setSalonUserId(int salonUserId) {
-		this.salonUserId = salonUserId;
-	}
-
+    public int getSalonUserId() { return salonUserId; }
+    public void setSalonUserId(int salonUserId) { this.salonUserId = salonUserId; }
 }

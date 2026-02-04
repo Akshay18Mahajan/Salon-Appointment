@@ -1,12 +1,27 @@
-# ===== React =====
+# Node
 node_modules/
+dist/
 build/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
 .env
+.env.local
 
-# ===== Spring Boot =====
+# Java / Spring Boot
 target/
-*.log
+*.class
 
-# ===== IDE / OS =====
+# IDE
 .vscode/
+.idea/
+*.iml
+
+# OS
 .DS_Store
+
+

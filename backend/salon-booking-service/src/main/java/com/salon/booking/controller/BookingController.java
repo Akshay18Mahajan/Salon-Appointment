@@ -11,22 +11,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.CollectionUtils;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import com.salon.booking.dao.BookingDao;
-import com.salon.booking.dto.BookingDetailDto;
-import com.salon.booking.dto.BookingDto;
-import com.salon.booking.dto.CommanApiResponse;
-import com.salon.booking.dto.Salon;
-import com.salon.booking.dto.SalonResponseDto;
-import com.salon.booking.dto.UpdateBookingStatusRequestDto;
-import com.salon.booking.dto.User;
-import com.salon.booking.dto.UsersResponseDto;
+import com.salon.booking.dto.*;
 import com.salon.booking.entity.Booking;
 import com.salon.booking.exception.BookingNotFoundException;
 import com.salon.booking.external.SalonService;
@@ -38,478 +26,228 @@ import com.salon.booking.utility.Helper;
 
 @Transactional
 @RestController
-@RequestMapping("api/book/salon")
-//@CrossOrigin(origins = "http://localhost:3000")
+@RequestMapping("/api/book/salon")
 public class BookingController {
 
-	Logger LOG = LoggerFactory.getLogger(BookingController.class);
+    Logger LOG = LoggerFactory.getLogger(BookingController.class);
+
+    @Autowired
+    private BookingService bookingService;
+
+    @Autowired
+    private BookingDao bookingDao;
+
+    @Autowired
+    private SalonService salonService;
+
+    @Autowired
+    private UserService userService;
+
+    // ===================== BOOKING VALIDATION =====================
+
+    @PostMapping("/validate")
+    public ResponseEntity<?> validateCustomerBooking(@RequestBody Booking booking) {
+
+        BookingDetailDto response = new BookingDetailDto();
+
+        if (booking == null || booking.getUserId() == 0 || booking.getSalonId() == 0) {
+            response.setResponseCode(ResponseCode.FAILED.value());
+            response.setResponseMessage("Invalid Booking Data");
+            return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        }
+
+        Salon salon = salonService.fetchSalon(booking.getSalonId()).getSalon();
+        User customer = userService.fetchUser(booking.getUserId()).getUser();
+
+        booking.setSalonUserId(salon.getUserId());
+
+        List<Booking> bookings = bookingDao
+                .findByDateAndTimeSlotAndStatusAndSalonId(
+                        booking.getDate(),
+                        booking.getTimeSlot(),
+                        BookingStatus.APPROVED.value(),
+                        booking.getSalonId());
+
+        if (!CollectionUtils.isEmpty(bookings)) {
+            response.setResponseCode(ResponseCode.FAILED.value());
+            response.setResponseMessage("Slot already booked");
+            return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        }
 
-	@Autowired
-	private BookingService bookingService;
+        booking.setStatus(BookingStatus.PENDING.value());
+        booking.setBookingId(Helper.getAlphaNumericId());
+        booking.setPrice(salon.getPricePerDay());
+        booking.setCustomerFirstName(customer.getFirstName());
+        booking.setCustomerLastName(customer.getLastName());
+        booking.setCustomerContact(customer.getContact());
+        booking.setCustomerEmailId(customer.getEmailId());
 
-	@Autowired
-	private BookingDao bookingDao;
+        Booking saved = bookingService.bookSalon(booking);
 
-	@Autowired
-	private SalonService salonService;
+        response.setBooking(saved);
+        response.setResponseCode(ResponseCode.SUCCESS.value());
+        response.setResponseMessage("Slot Available, Proceed to Payment");
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-	@Autowired
-	private UserService userService;
+    // ===================== CONFIRM BOOKING =====================
+    @GetMapping("/fetch/status")
+    public ResponseEntity<?> fetchAllBookingStatus() {
+        List<String> statuses = new ArrayList<>();
+        for (BookingStatus status : BookingStatus.values()) {
+            statuses.add(status.value());
+        }
+        return new ResponseEntity<>(statuses, HttpStatus.OK);
+    }
+    
+    @PostMapping("/")
+    public ResponseEntity<?> confirmBooking(@RequestBody Booking booking) {
 
-	@PostMapping("/validate")
-	public ResponseEntity<?> validateCustomerBooking(@RequestBody Booking booking) {
-		LOG.info("Recieved request for booking salon");
+        Booking pendingBooking = bookingDao.findById(booking.getId()).orElse(null);
 
-		System.out.println(booking);
+        if (pendingBooking == null) {
+            throw new BookingNotFoundException();
+        }
 
-		BookingDetailDto response = new BookingDetailDto();
+        pendingBooking.setStatus(BookingStatus.APPROVED.value());
+        bookingService.bookSalon(pendingBooking);
 
-		if (booking == null) {
-//			response.setResponseCode(ResponseCode.FAILED.value());
-//			response.setResponseMessage("Salon Booking Failed");
-//			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
+        CommanApiResponse response = new CommanApiResponse();
+        response.setResponseCode(ResponseCode.SUCCESS.value());
+        response.setResponseMessage("Booking Confirmed Successfully");
 
-			throw new BookingNotFoundException();
-		}
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-		if (booking.getUserId() == 0) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("User is not not looged in");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
+    // ===================== CUSTOMER BOOKINGS =====================
+    @PostMapping("/update-after-payment")
+    public ResponseEntity<?> updateAfterPayment(@RequestBody Booking booking) {
 
-		if (booking.getSalonId() == 0) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("Salon not found to Book");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
+        Booking updated = bookingService.updateBookingAfterPayment(
+                booking.getBookingId()
+        );
 
-		SalonResponseDto salonResponse = this.salonService.fetchSalon(booking.getSalonId());
+        CommanApiResponse response = new CommanApiResponse();
 
-		if (salonResponse == null) {
-			throw new RuntimeException("salon service is down!!!");
-		}
+        if (updated == null) {
+            response.setResponseCode(ResponseCode.FAILED.value());
+            response.setResponseMessage("Booking not found");
+            return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        }
 
-		Salon salon = salonResponse.getSalon();
+        response.setResponseCode(ResponseCode.SUCCESS.value());
+        response.setResponseMessage("Booking Approved");
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-		if (salon == null) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("No Salon present with this Id");
-		}
+    
+    
+    @GetMapping("/fetch")
+    public ResponseEntity<?> fetchCustomerBookings(@RequestParam int userId) {
 
-		UsersResponseDto customerResponse = this.userService.fetchUser(booking.getUserId());
+        BookingDetailDto response = new BookingDetailDto();
+        List<BookingDto> bookings = new ArrayList<>();
 
-		if (customerResponse == null) {
-			throw new RuntimeException("user service is down!!!");
-		}
+        for (Booking booking : bookingService.getMyBookings(userId)) {
 
-		User customer = customerResponse.getUser();
+            BookingDto dto = mapBookingToDto(booking);
+            bookings.add(dto);
+        }
 
-		if (customer == null) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("No Salon present with this Id");
-		}
+        response.setBookings(bookings);
+        response.setResponseCode(ResponseCode.SUCCESS.value());
+        response.setResponseMessage("Customer Bookings Fetched");
 
-		booking.setSalonUserId(salon.getUserId());
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-		List<Booking> bookings = this.bookingDao.findByDateAndTimeSlotAndStatusAndSalonId(booking.getDate(),
-				booking.getTimeSlot(), BookingStatus.APPROVED.value(), booking.getSalonId());
+    
+    @GetMapping("/fetch/bookings")
+    public ResponseEntity<?> fetchSalonBookings(@RequestParam int salonUserId) {
 
-		if (!CollectionUtils.isEmpty(bookings)) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("Slot already booked!!!");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
+        BookingDetailDto response = new BookingDetailDto();
+        List<BookingDto> bookings = new ArrayList<>();
 
-		booking.setStatus(BookingStatus.PENDING.value());
+        User salonUser = userService.fetchUser(salonUserId).getUser();
+        int salonId = salonUser.getSalonId();
 
-		booking.setBookingId(Helper.getAlphaNumericId());
-		booking.setPrice(salon.getPricePerDay());
-		booking.setCustomerContact(customer.getContact());
-		booking.setCustomerEmailId(customer.getEmailId());
-		booking.setCustomerFirstName(customer.getFirstName());
-		booking.setCustomerLastName(customer.getLastName());
+        for (Booking booking : bookingService.getMySalonBookings(salonId)) {
 
-		Booking bookedSalon = this.bookingService.bookSalon(booking);
+            BookingDto dto = mapBookingToDto(booking);
+            bookings.add(dto);
+        }
 
-		if (bookedSalon != null) {
-			response.setBooking(bookedSalon);
-			response.setResponseCode(ResponseCode.SUCCESS.value());
-			response.setResponseMessage("Congratulations, Slot is Available, Loading the payment page...");
-			return new ResponseEntity(response, HttpStatus.OK);
-		}
+        response.setBookings(bookings);
+        response.setResponseCode(ResponseCode.SUCCESS.value());
+        response.setResponseMessage("Salon Bookings Fetched");
 
-		else {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("Failed to Book Salon");
-			return new ResponseEntity(response, HttpStatus.INTERNAL_SERVER_ERROR);
-		}
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-	}
+    // ===================== ADMIN ALL BOOKINGS =====================
 
-	@PostMapping("/")
-	public ResponseEntity<?> addCustomerBooking(@RequestBody Booking booking) {
-		LOG.info("Recieved request for booking salon");
+    @GetMapping("/fetch/all")
+    public ResponseEntity<?> fetchAllBookings() {
 
-		CommanApiResponse response = new CommanApiResponse();
+        BookingDetailDto response = new BookingDetailDto();
+        List<BookingDto> bookings = new ArrayList<>();
 
-		if (booking == null) {
-//			response.setResponseCode(ResponseCode.FAILED.value());
-//			response.setResponseMessage("Salon Booking Failed");
-//			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
+        for (Booking booking : bookingService.getAllBookings()) {
 
-			throw new BookingNotFoundException();
-		}
+            BookingDto dto = mapBookingToDto(booking);
+            bookings.add(dto);
+        }
 
-		if (booking.getUserId() == 0) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("User is not not looged in");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
+        response.setBookings(bookings);
+        response.setResponseCode(ResponseCode.SUCCESS.value());
+        response.setResponseMessage("All Bookings Fetched");
 
-		if (booking.getSalonId() == 0) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("Salon not found to Book");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-		SalonResponseDto salonResponse = this.salonService.fetchSalon(booking.getSalonId());
+    // ===================== UPDATE STATUS =====================
 
-		if (salonResponse == null) {
-			throw new RuntimeException("salon service is down!!!");
-		}
+    @PostMapping("/update/status")
+    public ResponseEntity<?> updateStatus(@RequestBody UpdateBookingStatusRequestDto request) {
 
-		Salon salon = salonResponse.getSalon();
+        Booking booking = bookingService.getBookingById(request.getBookingId());
+        booking.setStatus(request.getStatus());
+        bookingService.bookSalon(booking);
 
-		if (salon == null) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("No Salon present with this Id");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
+        CommanApiResponse response = new CommanApiResponse();
+        response.setResponseCode(ResponseCode.SUCCESS.value());
+        response.setResponseMessage("Booking Status Updated");
 
-		// in validation part we have already done this
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
 
-//		List<Booking> bookings = this.bookingDao.findByDateAndTimeSlotAndStatusAndSalonId(booking.getDate(),
-//				booking.getTimeSlot(), BookingStatus.APPROVED.value(), booking.getSalonId());
-//
-//		if (!CollectionUtils.isEmpty(bookings)) {
-//			response.setResponseCode(ResponseCode.FAILED.value());
-//			response.setResponseMessage("Slot already booked!!!");
-//			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-//		}
+    // ===================== COMMON MAPPER =====================
 
-		Booking pendingBooking = this.bookingDao.findById(booking.getId()).orElse(null);
+    private BookingDto mapBookingToDto(Booking booking) {
 
-		if (pendingBooking == null) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("Failed to book the Salon Slot!!!");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
+        BookingDto dto = new BookingDto();
 
-		pendingBooking.setStatus(BookingStatus.APPROVED.value());
+        User customer = userService.fetchUser(booking.getUserId()).getUser();
+        Salon salon = salonService.fetchSalon(booking.getSalonId()).getSalon();
+        User salonUser = userService.fetchUser(salon.getUserId()).getUser();
 
-		Booking bookedSalon = this.bookingService.bookSalon(pendingBooking);
+        dto.setBookingId(booking.getBookingId());
+        dto.setDate(booking.getDate());
+        dto.setTimeSlot(booking.getTimeSlot());
+        dto.setStatus(booking.getStatus());
 
-		if (bookedSalon != null) {
-			response.setResponseCode(ResponseCode.SUCCESS.value());
-			response.setResponseMessage("Congratulions, you have booked the slot successful!!!");
-			return new ResponseEntity(response, HttpStatus.OK);
-		}
+        dto.setCustomerName(customer.getFirstName() + " " + customer.getLastName());
+        dto.setCustomerContact(customer.getContact());
 
-		else {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("Failed to Book Salon");
-			return new ResponseEntity(response, HttpStatus.INTERNAL_SERVER_ERROR);
-		}
+        dto.setSalonId(salon.getId());
+        dto.setSalonName(salon.getName());
+        dto.setSalonImage(salon.getImage1());
+        dto.setSalonContact(salonUser.getContact());
 
-	}
+        dto.setTotalAmount(String.valueOf(salon.getPricePerDay()));
+        dto.setUserId(customer.getId());
+        dto.setId(booking.getId());
 
-	@GetMapping("/fetch/all")
-	public ResponseEntity<?> fetchAllSalonBooking() {
-		LOG.info("Recieved request for fetch all booking");
-
-		BookingDetailDto response = new BookingDetailDto();
-
-		List<BookingDto> bookings = new ArrayList<>();
-
-		List<Booking> allBookings = this.bookingService.getAllBookings();
-
-		for (Booking booking : allBookings) {
-
-			BookingDto dto = new BookingDto();
-
-			dto.setBookingId(booking.getBookingId());
-			dto.setDate(booking.getDate());
-			dto.setTimeSlot(booking.getTimeSlot());
-
-			UsersResponseDto customerResponse = this.userService.fetchUser(booking.getUserId());
-
-			if (customerResponse == null) {
-				throw new RuntimeException("user service is down!!!");
-			}
-
-			User customer = customerResponse.getUser();
-			dto.setCustomerName(customer.getFirstName() + " " + customer.getLastName());
-
-			SalonResponseDto salonResponse = this.salonService.fetchSalon(booking.getSalonId());
-
-			if (salonResponse == null) {
-				throw new RuntimeException("salon service is down!!!");
-			}
-
-			Salon salon = salonResponse.getSalon();
-
-			UsersResponseDto salonUserResponse = this.userService.fetchUser(booking.getUserId());
-
-			if (salonUserResponse == null) {
-				throw new RuntimeException("user service is down!!!");
-			}
-
-			User salonUser = salonUserResponse.getUser();
-
-			dto.setSalonEmail(salon.getEmailId());
-			dto.setSalonContact(salonUser.getContact());
-			dto.setSalonId(salon.getId());
-			dto.setStatus(booking.getStatus());
-			dto.setUserId(customer.getId());
-			dto.setSalonName(salon.getName());
-			dto.setSalonImage(salon.getImage1());
-			dto.setCustomerContact(customer.getContact());
-			dto.setTotalAmount(String.valueOf(salon.getPricePerDay()));
-			dto.setId(booking.getId());
-
-			bookings.add(dto);
-		}
-
-		response.setBookings(bookings);
-		response.setResponseCode(ResponseCode.SUCCESS.value());
-		response.setResponseMessage("Booking Fetched Successfully");
-		return new ResponseEntity(response, HttpStatus.OK);
-
-	}
-
-	@GetMapping("/fetch")
-	public ResponseEntity<?> fetchMyBooking(@RequestParam("userId") int userId) {
-		LOG.info("Recieved request for fetch all booking");
-
-		BookingDetailDto response = new BookingDetailDto();
-
-		List<BookingDto> bookings = new ArrayList<>();
-
-		List<Booking> allBookings = this.bookingService.getMyBookings(userId);
-
-		for (Booking booking : allBookings) {
-
-			BookingDto dto = new BookingDto();
-
-			dto.setBookingId(booking.getBookingId());
-			dto.setDate(booking.getDate());
-			dto.setTimeSlot(booking.getTimeSlot());
-
-			UsersResponseDto customerResponse = this.userService.fetchUser(booking.getUserId());
-
-			if (customerResponse == null) {
-				throw new RuntimeException("user service is down!!!");
-			}
-
-			User customer = customerResponse.getUser();
-			dto.setCustomerName(customer.getFirstName() + " " + customer.getLastName());
-
-			SalonResponseDto salonResponse = this.salonService.fetchSalon(booking.getSalonId());
-
-			if (salonResponse == null) {
-				throw new RuntimeException("salon service is down!!!");
-			}
-
-			Salon salon = salonResponse.getSalon();
-
-			UsersResponseDto salonUserResponse = this.userService.fetchUser(booking.getUserId());
-
-			if (salonUserResponse == null) {
-				throw new RuntimeException("user service is down!!!");
-			}
-
-			User salonUser = salonUserResponse.getUser();
-			dto.setSalonEmail(salon.getEmailId());
-			dto.setSalonContact(salonUser.getContact());
-			dto.setSalonId(salon.getId());
-			dto.setStatus(booking.getStatus());
-
-			dto.setUserId(customer.getId());
-			dto.setSalonName(salon.getName());
-			dto.setSalonImage(salon.getImage1());
-			dto.setCustomerContact(customer.getContact());
-			dto.setTotalAmount(String.valueOf(salon.getPricePerDay()));
-			dto.setId(booking.getId());
-
-			bookings.add(dto);
-		}
-
-		response.setBookings(bookings);
-		response.setResponseCode(ResponseCode.SUCCESS.value());
-		response.setResponseMessage("Booking Fetched Successfully");
-		return new ResponseEntity(response, HttpStatus.OK);
-
-	}
-
-	@GetMapping("/fetch/id")
-	public ResponseEntity<?> fetchBookingById(@RequestParam("bookingId") int bookingId) {
-		LOG.info("Recieved request for fetch booking by Id");
-
-		Booking booking = this.bookingService.getBookingById(bookingId);
-
-		if (booking == null) {
-			throw new BookingNotFoundException();
-		}
-
-		BookingDto dto = new BookingDto();
-
-		dto.setBookingId(booking.getBookingId());
-		dto.setDate(booking.getDate());
-		dto.setTimeSlot(booking.getTimeSlot());
-
-		UsersResponseDto customerResponse = this.userService.fetchUser(booking.getUserId());
-
-		if (customerResponse == null) {
-			throw new RuntimeException("user service is down!!!");
-		}
-
-		User customer = customerResponse.getUser();
-		dto.setCustomerName(customer.getFirstName() + " " + customer.getLastName());
-
-		SalonResponseDto salonResponse = this.salonService.fetchSalon(booking.getSalonId());
-
-		if (salonResponse == null) {
-			throw new RuntimeException("salon service is down!!!");
-		}
-
-		Salon salon = salonResponse.getSalon();
-
-		UsersResponseDto salonUserResponse = this.userService.fetchUser(booking.getUserId());
-
-		if (salonUserResponse == null) {
-			throw new RuntimeException("user service is down!!!");
-		}
-
-		User salonUser = salonUserResponse.getUser();
-		dto.setSalonEmail(salon.getEmailId());
-		dto.setSalonContact(salonUser.getContact());
-		dto.setSalonId(salon.getId());
-		dto.setStatus(booking.getStatus());
-		dto.setUserId(customer.getId());
-		dto.setSalonName(salon.getName());
-		dto.setSalonImage(salon.getImage1());
-		dto.setCustomerContact(customer.getContact());
-		dto.setTotalAmount(String.valueOf(salon.getPricePerDay()));
-		dto.setId(booking.getId());
-
-		return new ResponseEntity(dto, HttpStatus.OK);
-
-	}
-
-	@GetMapping("/fetch/bookings")
-	public ResponseEntity<?> fetchMySalonBooking(@RequestParam("salonId") int salonId) {
-		LOG.info("Recieved request for fetch all booking");
-
-		BookingDetailDto response = new BookingDetailDto();
-
-		List<BookingDto> bookings = new ArrayList<>();
-
-		List<Booking> allBookings = this.bookingService.getMySalonBookings(salonId);
-
-		for (Booking booking : allBookings) {
-
-			BookingDto dto = new BookingDto();
-
-			dto.setBookingId(booking.getBookingId());
-			dto.setDate(booking.getDate());
-			dto.setTimeSlot(booking.getTimeSlot());
-
-			UsersResponseDto customerResponse = this.userService.fetchUser(booking.getUserId());
-
-			if (customerResponse == null) {
-				throw new RuntimeException("user service is down!!!");
-			}
-
-			User customer = customerResponse.getUser();
-			dto.setCustomerName(customer.getFirstName() + " " + customer.getLastName());
-
-			SalonResponseDto salonResponse = this.salonService.fetchSalon(booking.getSalonId());
-
-			if (salonResponse == null) {
-				throw new RuntimeException("salon service is down!!!");
-			}
-
-			Salon salon = salonResponse.getSalon();
-
-			UsersResponseDto salonUserResponse = this.userService.fetchUser(booking.getUserId());
-
-			if (salonUserResponse == null) {
-				throw new RuntimeException("user service is down!!!");
-			}
-
-			User salonUser = salonUserResponse.getUser();
-			dto.setSalonEmail(salon.getEmailId());
-			dto.setSalonContact(salonUser.getContact());
-			dto.setSalonId(salon.getId());
-			dto.setStatus(booking.getStatus());
-			dto.setUserId(customer.getId());
-			dto.setSalonName(salon.getName());
-			dto.setSalonImage(salon.getImage1());
-			dto.setCustomerContact(customer.getContact());
-			dto.setTotalAmount(String.valueOf(salon.getPricePerDay()));
-			dto.setId(booking.getId());
-
-			bookings.add(dto);
-		}
-
-		response.setBookings(bookings);
-		response.setResponseCode(ResponseCode.SUCCESS.value());
-		response.setResponseMessage("Booking Fetched Successfully");
-		return new ResponseEntity(response, HttpStatus.OK);
-
-	}
-
-	@GetMapping("/fetch/status")
-	public ResponseEntity<?> fetchAllBookingStatus() {
-		LOG.info("Recieved request for fetch all booking status");
-
-		List<String> response = new ArrayList<>();
-
-		for (BookingStatus status : BookingStatus.values()) {
-			response.add(status.value());
-		}
-
-		return new ResponseEntity(response, HttpStatus.OK);
-
-	}
-
-	@PostMapping("/update/status")
-	public ResponseEntity<?> updateSalonBookingStatus(@RequestBody UpdateBookingStatusRequestDto request) {
-
-		LOG.info("Recieved request for updating the Salon Booking Status");
-
-		CommanApiResponse response = new CommanApiResponse();
-
-		Booking b = this.bookingService.getBookingById(request.getBookingId());
-
-		if (b == null) {
-			throw new BookingNotFoundException();
-		}
-
-		if (request.getStatus().equals("") || request.getStatus() == null) {
-			response.setResponseCode(ResponseCode.FAILED.value());
-			response.setResponseMessage("Booking Status can not be empty");
-			return new ResponseEntity(response, HttpStatus.BAD_REQUEST);
-		}
-
-		b.setStatus(request.getStatus());
-		this.bookingService.bookSalon(b);
-
-		response.setResponseCode(ResponseCode.SUCCESS.value());
-		response.setResponseMessage("Booking Status Updated");
-		return new ResponseEntity(response, HttpStatus.OK);
-
-	}
-
+        return dto;
+    }
 }

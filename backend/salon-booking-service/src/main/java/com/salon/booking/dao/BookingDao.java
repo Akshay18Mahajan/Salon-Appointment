@@ -13,5 +13,5 @@ public interface BookingDao extends JpaRepository<Booking, Integer> {
 	List<Booking> findByUserId(int userId);
 	List<Booking> findBySalonId(int salonId);
 	List<Booking> findByDateAndTimeSlotAndStatusAndSalonId(String date, String timeSlot, String status, Integer salonId);
-	
+	Booking findByBookingId(String bookingId);
 }
